@@ -4,12 +4,18 @@
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
+
 package ti.modules.titanium.map;
 
 import org.appcelerator.titanium.proxy.TiViewProxy;
 
 import com.google.android.maps.GeoPoint;
 import com.google.android.maps.OverlayItem;
+
+import android.view.MotionEvent;
+import com.google.android.maps.MapView;
+
+import android.graphics.drawable.Drawable;
 
 public class TiOverlayItem extends OverlayItem
 {
@@ -18,10 +24,12 @@ public class TiOverlayItem extends OverlayItem
 	private TiViewProxy leftView;
 	private TiViewProxy rightView;
 	private AnnotationProxy proxy;
+  public Boolean draggable;
 
 	public TiOverlayItem(GeoPoint location, String title, String snippet, AnnotationProxy proxy) {
 		super(location,title,snippet);
 		this.proxy = proxy;
+    this.draggable = false;
 	}
 
 	public void setLeftButton(String path) {
@@ -64,4 +72,7 @@ public class TiOverlayItem extends OverlayItem
 	public boolean hasData() {
 		return getTitle() != null || getSnippet() != null | leftButtonPath != null || rightButtonPath != null;
 	}
+  public Drawable usedMarker() {
+    return mMarker;
+  }
 }

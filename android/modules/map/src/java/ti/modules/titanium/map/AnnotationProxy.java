@@ -24,7 +24,8 @@ import org.appcelerator.titanium.TiContext;
 	TiC.PROPERTY_RIGHT_VIEW,
 	TiC.PROPERTY_RIGHT_BUTTON,
 	TiC.PROPERTY_SUBTITLE,
-	TiC.PROPERTY_TITLE
+	TiC.PROPERTY_TITLE,
+	TiC.PROPERTY_DRAGGABLE
 })
 public class AnnotationProxy extends KrollProxy
 {

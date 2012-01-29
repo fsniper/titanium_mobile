@@ -44,6 +44,9 @@ import android.view.View;
 import android.view.ViewGroup.LayoutParams;
 import android.view.Window;
 import android.widget.Toast;
+import android.widget.ImageView;
+import android.widget.RelativeLayout;
+import android.graphics.Point;
 
 import com.google.android.maps.GeoPoint;
 import com.google.android.maps.ItemizedOverlay;
@@ -51,6 +54,7 @@ import com.google.android.maps.MapController;
 import com.google.android.maps.MapView;
 import com.google.android.maps.MyLocationOverlay;
 import com.google.android.maps.Overlay;
+import com.google.android.maps.Projection;
 
 interface TitaniumOverlayListener {
 	public void onTap(int index);
@@ -90,6 +94,7 @@ public class TiMapView extends TiUIView
 	private boolean userLocation;
 
 	private LocalMapView view;
+  private LocalRelativeMapView relative_view;
 	private Window mapWindow;
 	private TitaniumOverlay overlay;
 	private MyLocationOverlay myLocation;
@@ -97,6 +102,50 @@ public class TiMapView extends TiUIView
 	private ArrayList<AnnotationProxy> annotations;
 	private ArrayList<SelectedAnnotation> selectedAnnotations;
 	private Handler handler;
+	
+  class LocalRelativeMapView extends RelativeLayout {
+    Context context = null;
+    LocalMapView local_map_view;
+    ImageView drag_image;
+		private boolean scrollEnabled;
+
+    public LocalRelativeMapView(Context context) {
+      super(context);
+      this.context = context;
+    }
+
+    public void createView(String apikey) {
+      RelativeLayout.LayoutParams map_params = new RelativeLayout.LayoutParams(
+                                                        LayoutParams.MATCH_PARENT,
+                                                        LayoutParams.MATCH_PARENT
+                                                );
+      RelativeLayout.LayoutParams image_params = new RelativeLayout.LayoutParams(
+                                                        LayoutParams.WRAP_CONTENT,
+                                                        LayoutParams.WRAP_CONTENT
+                                                );
+      local_map_view = new LocalMapView(context, apikey);
+      local_map_view.setScrollable(false);
+
+      addView(local_map_view, map_params);
+
+      drag_image = new ImageView(context);
+      drag_image.setVisibility(View.GONE);
+      addView(drag_image, image_params);
+    }
+
+    public LocalMapView getMapView() {
+      return local_map_view;
+    }
+
+    public ImageView getImageView() {
+      return drag_image;
+    }
+
+		public void setScrollable(boolean enable)
+		{
+			local_map_view.setScrollable(enable);
+		}
+  }
 
 	class LocalMapView extends MapView
 	{
@@ -162,17 +211,30 @@ public class TiMapView extends TiUIView
 	class TitaniumOverlay extends ItemizedOverlay<TiOverlayItem>
 	{
 		ArrayList<AnnotationProxy> annotations;
+		ArrayList<TiOverlayItem> overlayitems;
 		TitaniumOverlayListener listener;
+		Drawable defaultDrawable;
 
-		public TitaniumOverlay(Drawable defaultDrawable, TitaniumOverlayListener listener)
+		AnnotationProxy dragging_annotation = null;
+		Point dragging_touch_offset = null;
+		Point dragging_offset = null;
+    LocalRelativeMapView local_map_view;
+		ImageView drag_image = null;
+
+		public TitaniumOverlay(Drawable defaultDrawable, TitaniumOverlayListener listener, LocalRelativeMapView lrmv)
 		{
 			super(defaultDrawable);
+      this.local_map_view = lrmv;
 			this.listener = listener;
+			this.defaultDrawable = defaultDrawable;
+			dragging_touch_offset = new Point(0,0);
+			dragging_offset = new Point(0,0);
 		}
 
 		public void setAnnotations(ArrayList<AnnotationProxy> annotations)
 		{
 			this.annotations = new ArrayList<AnnotationProxy>(annotations);
+			this.overlayitems = new ArrayList<TiOverlayItem>();
 			populate();
 		}
 
@@ -217,7 +279,7 @@ public class TiMapView extends TiUIView
 					try {
 						if (value instanceof String) {
 							
-							// Supported strings: Supported formats are: 
+							// Supported strings: Supported formats are:
 							//     #RRGGBB #AARRGGBB 'red', 'blue', 'green', 'black', 'white', 'gray', 'cyan', 'magenta', 'yellow', 'lightgray', 'darkgray'
 							int markerColor = TiConvert.toColor((String) value);
 							item.setMarker(makeMarker(markerColor));
@@ -240,7 +302,7 @@ public class TiMapView extends TiUIView
 						}
 
 					} catch (Exception e) {
-						// May as well catch all errors 
+						// May as well catch all errors
 						Log.w(LCAT, "Unable to parse color [" + TiConvert.toString(p.getProperty(TiC.PROPERTY_PINCOLOR))+"] for item ["+i+"]");
 					}
 				}
@@ -273,10 +335,14 @@ public class TiMapView extends TiUIView
 					}
 				}
 
+        if (p.hasProperty(TiC.PROPERTY_DRAGGABLE)) {
+          item.draggable = (TiConvert.toBoolean(p.getProperty(TiC.PROPERTY_DRAGGABLE)));
+        }
+
 			} else {
 				Log.w(LCAT, "Skipping annotation: No coordinates #" + i);
 			}
-
+			overlayitems.add(item);
 			return item;
 		}
 
@@ -285,16 +351,137 @@ public class TiMapView extends TiUIView
 		{
 			return (annotations == null) ? 0 : annotations.size();
 		}
+		
+    @Override
+		public boolean onTouchEvent(android.view.MotionEvent e, MapView mapView) {
 
-		@Override
-		protected boolean onTap(int index)
-		{
-			boolean handled = super.onTap(index);
-			if(!handled ) {
-				listener.onTap(index);
+			int action=e.getAction();
+			int x=(int)e.getX();
+      int y=(int)e.getY();
+
+      Projection pr = mapView.getProjection();
+      GeoPoint geoPoint = pr.fromPixels(x,y);
+			
+
+			boolean result = false;
+
+
+			HashMap<String, Object> location = new HashMap<String, Object>();
+			location.put(TiC.PROPERTY_LATITUDE, scaleFromGoogle(geoPoint.getLatitudeE6()));
+			location.put(TiC.PROPERTY_LONGITUDE, scaleFromGoogle(geoPoint.getLongitudeE6()));
+
+			if (action==MotionEvent.ACTION_DOWN) {
+				for (TiOverlayItem item : overlayitems) {
+						  	
+					Point p = new Point(0,0);
+
+					p = mapView.getProjection().toPixels(item.getPoint(), null);
+
+					Drawable testmarker = item.usedMarker();
+
+					if (hitTest(item, testmarker, x - p.x, y - p.y)) {
+						if (!item.draggable) return false;
+
+						result=true;
+
+						dragging_annotation = item.getProxy();
+            dragging_annotation.fireEvent(TiC.EVENT_ANNOTATION_DRAG_START, location);
+
+						drag_image = local_map_view.getImageView();
+            drag_image.setImageDrawable(testmarker.getConstantState().newDrawable());
+						//dragging_offset.set(
+						//	drag_image.getDrawable().getIntrinsicWidth()/2,
+						//	drag_image.getDrawable().getIntrinsicHeight()
+						//);
+
+						dragging_touch_offset.set(0,0);
+
+						overlayitems.remove(item);
+						annotations.remove(item.getProxy());
+            setLastFocusedIndex(-1);
+            populate();
+
+						setDragImagePosition(p.x, p.y);
+            drag_image.setVisibility(View.VISIBLE);
+
+						dragging_touch_offset.set(x - p.x, y - p.y);
+
+						break;
+					}
+				}
 			}
+      else if (action==MotionEvent.ACTION_MOVE && drag_image != null) {
+        dragging_annotation.setProperty(TiC.PROPERTY_LATITUDE, location.get(TiC.PROPERTY_LATITUDE));
+        dragging_annotation.setProperty(TiC.PROPERTY_LONGITUDE, location.get(TiC.PROPERTY_LONGITUDE));
+        setDragImagePosition(x, y);
+        result=true;
+      }
+      else if (action==MotionEvent.ACTION_UP && drag_image != null) {
+				listener.onTap(annotations.indexOf(dragging_annotation));
 
-			return handled;
+        drag_image.setVisibility(View.GONE);
+        drag_image = null;
+
+        dragging_annotation.setProperty(TiC.PROPERTY_LATITUDE, location.get(TiC.PROPERTY_LATITUDE));
+        dragging_annotation.setProperty(TiC.PROPERTY_LONGITUDE, location.get(TiC.PROPERTY_LONGITUDE));
+
+				annotations.add(dragging_annotation);
+        dragging_annotation.fireEvent(TiC.EVENT_ANNOTATION_DRAG_END, location);
+        TiOverlayItem newitem = createItem(annotations.indexOf(dragging_annotation));
+
+        overlayitems.add(newitem);
+        setLastFocusedIndex(-1);
+        populate();
+
+				dragging_annotation = null;
+        result=true;
+      } else {
+        if (drag_image != null) {
+          dragging_annotation.setProperty(TiC.PROPERTY_LATITUDE, location.get(TiC.PROPERTY_LATITUDE));
+          dragging_annotation.setProperty(TiC.PROPERTY_LONGITUDE, location.get(TiC.PROPERTY_LONGITUDE));
+          drag_image.setVisibility(View.GONE);
+          dragging_annotation.fireEvent(TiC.EVENT_ANNOTATION_DRAG_END, location);
+          TiOverlayItem newitem = createItem(annotations.indexOf(dragging_annotation));
+
+          annotations.add(dragging_annotation);
+          overlayitems.add(newitem);
+          setLastFocusedIndex(-1);
+          populate();
+
+				  listener.onTap(annotations.indexOf(dragging_annotation));
+          dragging_annotation = null;
+          drag_image = null;
+          result=true;
+        }
+        result = false;
+      }
+
+			return(result || super.onTouchEvent(e, mapView));
+
+		}
+
+		private void setDragImagePosition(int x, int y) {
+
+      if ( drag_image != null ) {
+        Log.i(LCAT, "XXX drag_image is not null");
+        RelativeLayout.LayoutParams lp =
+          (RelativeLayout.LayoutParams)drag_image.getLayoutParams();
+
+        lp.setMargins(x - dragging_touch_offset.x - dragging_offset.x,
+                      y - dragging_touch_offset.y - dragging_offset.y, 0, 0);
+
+        drag_image.setLayoutParams(lp);
+      }
+		}
+
+		private double scaleFromGoogle(int value)
+		{
+			return (double)value / 1000000.0;
+		}
+
+		private int scaleToGoogle(double value)
+		{
+			return (int)(value * 1000000);
 		}
 	}
 
@@ -360,7 +547,10 @@ public class TiMapView extends TiUIView
 			Log.d(LCAT, "Development mode using map api key ending with '" + developmentKey.substring(developmentKey.length() - 10, developmentKey.length()) + "' retrieved from " + devKeySourceInfo);
 		}
 
-		view = new LocalMapView(mapWindow.getContext(), apiKey);
+    relative_view = new LocalRelativeMapView(mapWindow.getContext());
+    relative_view.createView(apiKey);
+    ImageView image_view = relative_view.getImageView();
+		view = relative_view.getMapView();
 		TiMapActivity ma = (TiMapActivity) mapWindow.getContext();
 
 		ma.setLifecycleListener(new OnLifecycleEvent() {
@@ -392,7 +582,7 @@ public class TiMapView extends TiUIView
 		view.setScrollable(true);
 		view.setClickable(true);
 
-		setNativeView(view);
+    setNativeView(relative_view);
 
 		this.regionFit = true;
 		this.animate = false;
@@ -586,7 +776,7 @@ public class TiMapView extends TiUIView
 				if (newValue instanceof AnnotationProxy) {
 					AnnotationProxy ap = (AnnotationProxy) newValue;
 
-					// TODO - implement a way to get all cached properties for a proxy - set annotation 
+					// TODO - implement a way to get all cached properties for a proxy - set annotation
 					// via dict for now
 					// doSetLocation(ap.getProperties());
 				} else if (newValue instanceof HashMap) {
@@ -663,7 +853,7 @@ public class TiMapView extends TiUIView
 				}
 
 				if (annotations.size() > 0) {
-					overlay = new TitaniumOverlay(makeMarker(Color.BLUE), this);
+					overlay = new TitaniumOverlay(makeMarker(Color.BLUE), this, relative_view);
 					overlay.setAnnotations(annotations);
 					overlays.add(overlay);
 

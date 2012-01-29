@@ -72,6 +72,8 @@ public class TiC
 	public static final String EVENT_PROPERTY_X = "x";
 	public static final String EVENT_PROPERTY_Y = "y";
 	public static final String EVENT_REGION_CHANGED = "regionChanged";
+	public static final String EVENT_ANNOTATION_DRAG_START = "annotationDragStart";
+	public static final String EVENT_ANNOTATION_DRAG_END = "annotationDragEnd";
 	public static final String EVENT_RESTART = "restart";
 	public static final String EVENT_RESUME = "resume";
 	public static final String EVENT_SCROLL = "scroll";
@@ -167,6 +169,7 @@ public class TiC
 	public static final String PROPERTY_DIRECTION = "direction";
 	public static final String PROPERTY_DISPLAY_ADDRESS = "displayAddress";
 	public static final String PROPERTY_DURATION = "duration";
+	public static final String PROPERTY_DRAGGABLE = "draggable";
 	public static final String PROPERTY_EDITABLE = "editable";
 	public static final String PROPERTY_ELLIPSIZE = "ellipsize";
 	public static final String PROPERTY_ENABLE_ZOOM_CONTROLS = "enableZoomControls";
